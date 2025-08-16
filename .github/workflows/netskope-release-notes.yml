@@ -6,7 +6,6 @@ on:
       release_url:
         description: 'Netskope Release Notes URL'
         required: true
-        default: 'https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0'
       dry_run:
         description: 'Dry run (parse only, do not create discussion)'
         required: false
