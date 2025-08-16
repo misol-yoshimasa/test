@@ -285,14 +285,19 @@ class ReleaseNotesParser:
     def extract_text_content(self, element) -> str:
         """Extract and format text content from an element"""
         if element.name == 'ul':
-            items = [f"- {li.get_text(strip=True)}" for li in element.find_all('li')]
+            items = []
+            for li in element.find_all('li'):
+                li_text = self.convert_element_to_markdown(li)
+                items.append(f"- {li_text}")
             return '\n'.join(items)
         elif element.name == 'ol':
-            items = [f"{i+1}. {li.get_text(strip=True)}" 
-                    for i, li in enumerate(element.find_all('li'))]
+            items = []
+            for i, li in enumerate(element.find_all('li')):
+                li_text = self.convert_element_to_markdown(li)
+                items.append(f"{i+1}. {li_text}")
             return '\n'.join(items)
         else:
-            return element.get_text(strip=True)
+            return self.convert_element_to_markdown(element)
     
     def extract_content_with_images(self, element) -> str:
         """Extract text content with embedded images as markdown"""
@@ -329,19 +334,58 @@ class ReleaseNotesParser:
     
     def process_element_with_images(self, element) -> str:
         """Process an element converting images to markdown"""
+        return self.convert_element_to_markdown(element)
+    
+    def convert_element_to_markdown(self, element) -> str:
+        """Convert HTML element to markdown, preserving links and images"""
+        if isinstance(element, str):
+            return element.strip()
+        
         result = []
         
         # Process all children
         for child in element.children:
             if isinstance(child, str):
-                result.append(child.strip())
+                text = child.strip()
+                if text:
+                    result.append(text)
+            elif child.name == 'a':
+                # Convert links to markdown
+                link_text = child.get_text(strip=True)
+                href = child.get('href', '')
+                if href:
+                    # Handle relative URLs
+                    if href.startswith('/'):
+                        href = f"https://docs.netskope.com{href}"
+                    elif not href.startswith(('http://', 'https://', 'mailto:', '#')):
+                        href = f"https://docs.netskope.com/{href}"
+                    result.append(f"[{link_text}]({href})")
+                else:
+                    result.append(link_text)
             elif child.name == 'img':
                 img_markdown = self.image_to_markdown(child)
                 if img_markdown:
                     result.append(img_markdown)
+            elif child.name in ['strong', 'b']:
+                # Convert bold to markdown
+                text = self.convert_element_to_markdown(child)
+                if text:
+                    result.append(f"**{text}**")
+            elif child.name in ['em', 'i']:
+                # Convert italic to markdown
+                text = self.convert_element_to_markdown(child)
+                if text:
+                    result.append(f"*{text}*")
+            elif child.name == 'code':
+                # Convert code to markdown
+                text = child.get_text(strip=True)
+                if text:
+                    result.append(f"`{text}`")
+            elif child.name == 'br':
+                result.append('\n')
             else:
                 # Recursively process other elements
-                text = child.get_text(strip=True)
+                text = self.convert_element_to_markdown(child)
                 if text:
                     result.append(text)
         
