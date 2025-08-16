@@ -3,10 +3,14 @@ name: Netskope Release Notes to Discussions
 on:
   workflow_dispatch:
     inputs:
+      release_version:
+        description: 'Release version (e.g., 129.0.0, 130.0.0) or leave empty to use custom URL'
+        required: false
+        default: '129.0.0'
       release_url:
-        description: 'Netskope Release Notes URL'
-        required: true
-        default: 'https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0'
+        description: 'Custom Release Notes URL (used if release_version is empty)'
+        required: false
+        default: ''
       dry_run:
         description: 'Dry run (parse only, do not create discussion)'
         required: false
@@ -46,10 +50,25 @@ jobs:
       - name: Parse Release Notes
         id: parse
         run: |
-          echo "📋 Parsing release notes from: ${{ github.event.inputs.release_url }}"
+          # Determine URL to use
+          if [ -n "${{ github.event.inputs.release_version }}" ]; then
+            VERSION="${{ github.event.inputs.release_version }}"
+            VERSION_DASHED="${VERSION//./-}"
+            URL="https://docs.netskope.com/en/new-features-and-enhancements-in-release-${VERSION_DASHED}"
+            echo "📋 Parsing release notes for version $VERSION"
+          elif [ -n "${{ github.event.inputs.release_url }}" ]; then
+            URL="${{ github.event.inputs.release_url }}"
+            echo "📋 Parsing release notes from custom URL"
+          else
+            # Default to 129.0.0
+            URL="https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0"
+            echo "📋 Parsing release notes for default version 129.0.0"
+          fi
+          
+          echo "URL: $URL"
           
           # Run parser with Playwright and save output
-          python .github/scripts/parse_release_notes_playwright.py "${{ github.event.inputs.release_url }}" > release_notes.json
+          python .github/scripts/parse_release_notes_playwright.py "$URL" > release_notes.json
           
           # Display summary
           echo "✅ Parsing complete. Found features:"

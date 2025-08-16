@@ -149,8 +149,8 @@ mutation($discussionId: ID!, $body: String!) {
 '''
 
 for i, feature in enumerate(features, 1):
-    # Create comment body with category label
-    comment_body = f'## [{feature["category"]}] {feature["title"]}\n\n'
+    # Create comment body without category in title
+    comment_body = f'## {feature["title"]}\n\n'
     comment_body += feature['description']
     comment_body += f'\n\n---\n*Category: {feature["category"]}*'
     
