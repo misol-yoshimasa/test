@@ -28,9 +28,10 @@ Important:
 - Translate alt text in images
 - Maintain list formatting
 - Keep proper nouns like "Netskope", "AWS", etc. in English
-- Only translate the provided text, do not add context information"""
+- Only translate the provided text, do not add context information
+- Do NOT add or duplicate any titles/headings that aren't in the original text"""
 
-        user_prompt = f"Translate ONLY the following text to Japanese (ignore context, it's just for reference):\n\n{text}"
+        user_prompt = f"Translate ONLY the following text to Japanese (DO NOT add titles or headings):\n\n{text}"
         
         if context:
             user_prompt = f"Reference context (DO NOT include in translation): {context}\n\n{user_prompt}"
@@ -56,7 +57,7 @@ def create_bilingual_content(title: str, content: str, title_ja: str, content_ja
     """
     Create bilingual content with Japanese as main and English in collapsible section
     """
-    # Format the bilingual content (no emojis, no category duplication)
+    # Format the bilingual content with title included once
     bilingual = f"## {title_ja}\n\n"
     bilingual += f"{content_ja}\n\n"
     bilingual += "<details>\n"
