@@ -257,21 +257,27 @@ class ReleaseNotesParser:
         sibling = element.find_next_sibling()
         
         while sibling and sibling.name not in ['h3', 'h4', 'h5', 'h6']:
-            if sibling.name in ['p', 'ul', 'ol', 'div']:
-                # Extract text and images
-                content = self.extract_content_with_images(sibling)
-                if content and len(content) > 10:  # Skip very short text
-                    description_parts.append(content)
-            elif sibling.name == 'img':
-                # Handle standalone images
-                img_markdown = self.image_to_markdown(sibling)
-                if img_markdown:
-                    description_parts.append(img_markdown)
+            # Handle all elements, including divs, p, lists, etc.
+            if sibling.name:
+                # Look for images within any element
+                images = sibling.find_all('img')
+                for img in images:
+                    src = img.get('src', '')
+                    # Only include actual content images
+                    if src and ('wp-content/uploads' in src or src.startswith('http')):
+                        img_markdown = self.image_to_markdown(img)
+                        if img_markdown and img_markdown not in '\n'.join(description_parts):
+                            description_parts.append(img_markdown)
+                
+                # Extract text content
+                text = self.extract_text_content(sibling)
+                if text and len(text) > 10:  # Skip very short text
+                    description_parts.append(text)
             
             sibling = sibling.find_next_sibling()
             
             # Stop if we've collected enough description
-            if len(' '.join(description_parts)) > 500:
+            if len('\n'.join(description_parts)) > 1000:
                 break
         
         return '\n\n'.join(description_parts) if description_parts else ""
@@ -344,10 +350,18 @@ class ReleaseNotesParser:
     def image_to_markdown(self, img_element) -> str:
         """Convert an img element to markdown format"""
         src = img_element.get('src', '')
-        alt = img_element.get('alt', 'Image')
+        alt = img_element.get('alt', '')
         
         if not src:
             return ''
+        
+        # Skip icons and logos
+        if 'logo' in src.lower() or 'icon' in src.lower() or src.startswith('data:'):
+            return ''
+        
+        # Use a default alt text if none provided
+        if not alt:
+            alt = 'Image'
         
         # Handle relative URLs
         if src.startswith('/'):
