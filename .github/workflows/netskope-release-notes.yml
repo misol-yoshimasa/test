@@ -1,0 +1,281 @@
+name: Netskope Release Notes to Discussions
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_url:
+        description: 'Netskope Release Notes URL'
+        required: true
+        default: 'https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0'
+      dry_run:
+        description: 'Dry run (parse only, do not create discussion)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-release-discussion:
+    runs-on: ubuntu-latest
+    permissions:
+      discussions: write
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('.github/scripts/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r .github/scripts/requirements.txt
+      
+      - name: Parse Release Notes
+        id: parse
+        run: |
+          echo "📋 Parsing release notes from: ${{ github.event.inputs.release_url }}"
+          
+          # Run parser and save output
+          python .github/scripts/parse_release_notes.py "${{ github.event.inputs.release_url }}" > release_notes.json
+          
+          # Display summary
+          echo "✅ Parsing complete. Found features:"
+          python -c "
+          import json
+          with open('release_notes.json') as f:
+              data = json.load(f)
+              print(f\"Version: {data['version']}\")
+              print(f\"Total features: {len(data['features'])}\")
+              
+              # Group by category
+              categories = {}
+              for feature in data['features']:
+                  cat = feature['category']
+                  if cat not in categories:
+                      categories[cat] = 0
+                  categories[cat] += 1
+              
+              for cat, count in sorted(categories.items()):
+                  print(f\"  - {cat}: {count} features\")
+          "
+          
+          # Set outputs for next steps
+          VERSION=$(python -c "import json; print(json.load(open('release_notes.json'))['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Create Discussion and Comments
+        if: ${{ github.event.inputs.dry_run == 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Creating Discussion for Release ${{ steps.parse.outputs.version }}"
+          
+          # Python script to create discussion and comments
+          python -c "
+          import json
+          import subprocess
+          import time
+          import sys
+          
+          def run_gh_command(args):
+              \"\"\"Run gh CLI command and return output\"\"\"
+              result = subprocess.run(
+                  ['gh'] + args,
+                  capture_output=True,
+                  text=True,
+                  check=False
+              )
+              if result.returncode != 0:
+                  print(f'Error: {result.stderr}')
+                  return None
+              return result.stdout
+          
+          # Load parsed release notes
+          with open('release_notes.json') as f:
+              data = json.load(f)
+          
+          version = data['version']
+          features = data['features']
+          
+          # Create discussion title and body
+          discussion_title = f'Netskope Release {version} - New Features and Enhancements'
+          
+          # Create main discussion body with summary
+          categories = {}
+          for feature in features:
+              cat = feature['category']
+              if cat not in categories:
+                  categories[cat] = []
+              categories[cat].append(feature['title'])
+          
+          discussion_body = f'# Netskope Release {version} - New Features and Enhancements\\n\\n'
+          discussion_body += 'This discussion contains all the new features and enhancements '
+          discussion_body += f'from Netskope Release {version}.\\n\\n'
+          discussion_body += 'Each feature is posted as a separate comment below for easy reference and discussion.\\n\\n'
+          discussion_body += f'**Total Features:** {len(features)}\\n\\n'
+          discussion_body += '## Features by Category\\n\\n'
+          
+          for cat, titles in sorted(categories.items()):
+              discussion_body += f'### {cat}\\n'
+              for title in titles:
+                  discussion_body += f'- {title}\\n'
+              discussion_body += '\\n'
+          
+          discussion_body += '---\\n'
+          discussion_body += f'*Source: [{data.get(\"url\", \"Release Notes\")}]({data.get(\"url\", \"#\")})*\\n'
+          discussion_body += f'*Generated by GitHub Actions on {time.strftime(\"%Y-%m-%d %H:%M:%S UTC\")}*'
+          
+          # Get repository ID for GraphQL
+          repo_info = run_gh_command(['api', 'repos/${{ github.repository }}', '--jq', '.node_id'])
+          if not repo_info:
+              print('Failed to get repository info')
+              sys.exit(1)
+          repo_id = repo_info.strip()
+          
+          # Get Announcements category ID
+          categories_output = run_gh_command([
+              'api', 'repos/${{ github.repository }}/discussion-categories',
+              '--jq', '.[] | select(.slug == \"announcements\") | .node_id'
+          ])
+          
+          if not categories_output:
+              print('Failed to find Announcements category')
+              sys.exit(1)
+          
+          category_id = categories_output.strip()
+          
+          # Create the main discussion using GraphQL
+          print(f'Creating discussion: {discussion_title}')
+          
+          mutation = '''
+          mutation($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+            createDiscussion(input: {
+              repositoryId: $repositoryId
+              categoryId: $categoryId
+              title: $title
+              body: $body
+            }) {
+              discussion {
+                id
+                number
+                url
+              }
+            }
+          }
+          '''
+          
+          # Write mutation to file to avoid shell escaping issues
+          with open('create_discussion.graphql', 'w') as f:
+              f.write(mutation)
+          
+          # Write variables to file
+          variables = {
+              'repositoryId': repo_id,
+              'categoryId': category_id,
+              'title': discussion_title,
+              'body': discussion_body
+          }
+          
+          with open('variables.json', 'w') as f:
+              json.dump(variables, f)
+          
+          # Execute GraphQL mutation
+          result = run_gh_command([
+              'api', 'graphql',
+              '--input', 'create_discussion.graphql',
+              '--jq', '.createDiscussion.discussion'
+          ])
+          
+          if not result:
+              print('Failed to create discussion')
+              sys.exit(1)
+          
+          discussion_data = json.loads(result)
+          discussion_id = discussion_data['id']
+          discussion_number = discussion_data['number']
+          discussion_url = discussion_data['url']
+          
+          print(f'✅ Discussion created: #{discussion_number}')
+          print(f'   URL: {discussion_url}')
+          
+          # Add comments for each feature
+          print(f'\\nAdding {len(features)} feature comments...')
+          
+          comment_mutation = '''
+          mutation($discussionId: ID!, $body: String!) {
+            addDiscussionComment(input: {
+              discussionId: $discussionId
+              body: $body
+            }) {
+              comment {
+                id
+                url
+              }
+            }
+          }
+          '''
+          
+          with open('add_comment.graphql', 'w') as f:
+              f.write(comment_mutation)
+          
+          for i, feature in enumerate(features, 1):
+              # Create comment body with category label
+              comment_body = f'## 🏷️ [{feature[\"category\"]}] {feature[\"title\"]}\\n\\n'
+              comment_body += feature['description']
+              comment_body += f'\\n\\n---\\n*Category: {feature[\"category\"]}*'
+              
+              # Add comment
+              comment_vars = {
+                  'discussionId': discussion_id,
+                  'body': comment_body
+              }
+              
+              with open('comment_vars.json', 'w') as f:
+                  json.dump(comment_vars, f)
+              
+              result = run_gh_command([
+                  'api', 'graphql',
+                  '--input', 'add_comment.graphql',
+                  '--jq', '.addDiscussionComment.comment.url'
+              ])
+              
+              if result:
+                  print(f'  [{i}/{len(features)}] Added: {feature[\"title\"][:50]}...')
+              else:
+                  print(f'  [{i}/{len(features)}] Failed: {feature[\"title\"][:50]}...')
+              
+              # Small delay to avoid rate limiting
+              time.sleep(0.5)
+          
+          print(f'\\n🎉 Successfully created discussion with {len(features)} feature comments!')
+          print(f'View at: {discussion_url}')
+          "
+      
+      - name: Dry Run Summary
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "🔍 DRY RUN - No discussion was created"
+          echo ""
+          echo "Release notes parsed successfully. To create the discussion, run the workflow again with dry_run = false"
+          echo ""
+          echo "📊 Parsed content summary:"
+          cat release_notes.json | python -m json.tool
+      
+      - name: Upload Release Notes Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-notes-${{ steps.parse.outputs.version }}
+          path: release_notes.json
+          retention-days: 30

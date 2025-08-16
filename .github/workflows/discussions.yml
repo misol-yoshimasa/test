@@ -1,0 +1,126 @@
+name: GitHub Discussions Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - list
+          - create
+          - comment
+      title:
+        description: 'Discussion title (for create action)'
+        required: false
+      body:
+        description: 'Discussion body (for create action)'
+        required: false
+      category:
+        description: 'Discussion category (for create action)'
+        required: false
+        default: 'announcements'
+      discussion_number:
+        description: 'Discussion number (for comment action)'
+        required: false
+      comment_body:
+        description: 'Comment body (for comment action)'
+        required: false
+
+jobs:
+  manage-discussions:
+    runs-on: ubuntu-latest
+    permissions:
+      discussions: write
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: List Discussions
+        if: ${{ github.event.inputs.action == 'list' }}
+        run: |
+          echo "📋 Fetching discussions list..."
+          gh api repos/${{ github.repository }}/discussions \
+            --jq '.[] | "[\(.number)] \(.title) by @\(.user.login) - \(.state)"' || echo "No discussions found"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create Discussion
+        if: ${{ github.event.inputs.action == 'create' }}
+        run: |
+          echo "✨ Creating new discussion..."
+          
+          # Get category ID
+          CATEGORY_ID=$(gh api repos/${{ github.repository }}/discussion-categories \
+            --jq '.[] | select(.slug == "${{ github.event.inputs.category }}") | .id')
+          
+          if [ -z "$CATEGORY_ID" ]; then
+            echo "❌ Category '${{ github.event.inputs.category }}' not found"
+            echo "Available categories:"
+            gh api repos/${{ github.repository }}/discussion-categories \
+              --jq '.[] | "- \(.slug): \(.name)"'
+            exit 1
+          fi
+          
+          # Create discussion using GraphQL
+          gh api graphql -f query='
+            mutation($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) {
+              createDiscussion(input: {
+                repositoryId: $repositoryId
+                categoryId: $categoryId
+                title: $title
+                body: $body
+              }) {
+                discussion {
+                  id
+                  number
+                  title
+                  url
+                }
+              }
+            }
+          ' -f repositoryId="${{ github.repository_id }}" \
+            -f categoryId="$CATEGORY_ID" \
+            -f title="${{ github.event.inputs.title }}" \
+            -f body="${{ github.event.inputs.body }}" \
+            --jq '.createDiscussion.discussion | "✅ Discussion created: #\(.number) - \(.title)\nURL: \(.url)"'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Add Comment to Discussion
+        if: ${{ github.event.inputs.action == 'comment' }}
+        run: |
+          echo "💬 Adding comment to discussion #${{ github.event.inputs.discussion_number }}..."
+          
+          # Get discussion ID
+          DISCUSSION_ID=$(gh api repos/${{ github.repository }}/discussions/${{ github.event.inputs.discussion_number }} \
+            --jq '.node_id')
+          
+          if [ -z "$DISCUSSION_ID" ]; then
+            echo "❌ Discussion #${{ github.event.inputs.discussion_number }} not found"
+            exit 1
+          fi
+          
+          # Add comment using GraphQL
+          gh api graphql -f query='
+            mutation($discussionId: ID!, $body: String!) {
+              addDiscussionComment(input: {
+                discussionId: $discussionId
+                body: $body
+              }) {
+                comment {
+                  id
+                  body
+                  createdAt
+                  url
+                }
+              }
+            }
+          ' -f discussionId="$DISCUSSION_ID" \
+            -f body="${{ github.event.inputs.comment_body }}" \
+            --jq '.addDiscussionComment.comment | "✅ Comment added at \(.createdAt)\nURL: \(.url)"'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
