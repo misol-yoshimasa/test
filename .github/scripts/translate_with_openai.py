@@ -27,12 +27,13 @@ Important:
 - Keep URLs, image links, and code blocks unchanged
 - Translate alt text in images
 - Maintain list formatting
-- Keep proper nouns like "Netskope", "AWS", etc. in English"""
+- Keep proper nouns like "Netskope", "AWS", etc. in English
+- Only translate the provided text, do not add context information"""
 
-        user_prompt = f"Translate to Japanese:\n\n{text}"
+        user_prompt = f"Translate ONLY the following text to Japanese (ignore context, it's just for reference):\n\n{text}"
         
         if context:
-            user_prompt = f"Context: {context}\n\n{user_prompt}"
+            user_prompt = f"Reference context (DO NOT include in translation): {context}\n\n{user_prompt}"
 
         response = client.chat.completions.create(
             model="gpt-4o",
