@@ -53,16 +53,15 @@ Important:
         return f"[翻訳エラー: {str(e)}]\n\n{text}"
 
 
-def create_bilingual_content(title: str, content: str, title_ja: str, content_ja: str, category: str) -> str:
+def create_bilingual_content(title: str, content: str, title_en: str, content_ja: str, category: str) -> str:
     """
-    Create bilingual content with Japanese as main and English in collapsible section
+    Create bilingual content with English title and Japanese translation
     """
-    # Format the bilingual content with title included once
-    bilingual = f"## {title_ja}\n\n"
+    # Format with English title and Japanese translation
+    bilingual = f"## {title_en}\n\n"
     bilingual += f"{content_ja}\n\n"
     bilingual += "<details>\n"
     bilingual += "<summary>View original English version</summary>\n\n"
-    bilingual += f"### {title}\n\n"
     bilingual += f"{content}\n\n"
     bilingual += "</details>"
     
@@ -82,32 +81,25 @@ def translate_features(features: List[Dict], api_key: str) -> List[Dict]:
     for i, feature in enumerate(features, 1):
         print(f"Translating [{i}/{total}]: {feature['title'][:50]}...", file=sys.stderr)
         
-        # Translate title
-        title_ja = translate_text(
-            client, 
-            feature['title'],
-            context=f"Category: {feature['category']}"
-        )
-        
-        # Translate description
+        # Only translate description, keep title in English
         description_ja = translate_text(
             client,
             feature['description'],
             context=f"Feature: {feature['title']}, Category: {feature['category']}"
         )
         
-        # Create bilingual content
+        # Create bilingual content with English title
         bilingual_description = create_bilingual_content(
             feature['title'],
             feature['description'],
-            title_ja,
+            feature['title'],  # Use English title for both
             description_ja,
             feature['category']
         )
         
         translated_features.append({
             'category': feature['category'],
-            'title': title_ja,  # Use Japanese title as main
+            'title': feature['title'],  # Keep English title
             'title_en': feature['title'],  # Keep English title
             'description': bilingual_description  # Bilingual content
         })
