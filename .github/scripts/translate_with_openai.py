@@ -55,16 +55,14 @@ def create_bilingual_content(title: str, content: str, title_ja: str, content_ja
     """
     Create bilingual content with Japanese as main and English in collapsible section
     """
-    # Format the bilingual content
+    # Format the bilingual content (no emojis, no category duplication)
     bilingual = f"## {title_ja}\n\n"
     bilingual += f"{content_ja}\n\n"
     bilingual += "<details>\n"
-    bilingual += "<summary>🇬🇧 View original English version</summary>\n\n"
+    bilingual += "<summary>View original English version</summary>\n\n"
     bilingual += f"### {title}\n\n"
     bilingual += f"{content}\n\n"
-    bilingual += "</details>\n\n"
-    bilingual += "---\n"
-    bilingual += f"*Category: {category}*"
+    bilingual += "</details>"
     
     return bilingual
 
