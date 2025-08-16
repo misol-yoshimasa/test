@@ -274,7 +274,7 @@ jobs:
           cat release_notes.json | python -m json.tool
       
       - name: Upload Release Notes Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-notes-${{ steps.parse.outputs.version }}
           path: release_notes.json
