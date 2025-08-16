@@ -102,26 +102,16 @@ mutation($repositoryId: ID!, $categoryId: ID!, $title: String!, $body: String!) 
 }
 '''
 
-# Write mutation and variables to files for gh command
-with open('create_discussion.graphql', 'w') as f:
-    f.write(mutation)
-
-variables = {
-    'repositoryId': repo_id,
-    'categoryId': category_id,
-    'title': discussion_title,
-    'body': discussion_body
-}
-
-with open('variables.json', 'w') as f:
-    json.dump(variables, f)
-
-# Execute GraphQL mutation
+# Execute GraphQL mutation with variables
 result = subprocess.run(
-    ['gh', 'api', 'graphql', '--input', 'create_discussion.graphql'],
+    ['gh', 'api', 'graphql', 
+     '-f', f'query={mutation}',
+     '-f', f'repositoryId={repo_id}',
+     '-f', f'categoryId={category_id}',
+     '-f', f'title={discussion_title}',
+     '-f', f'body={discussion_body}'],
     capture_output=True,
-    text=True,
-    env={**os.environ, 'GH_GRAPHQL_VARIABLES': json.dumps(variables)}
+    text=True
 )
 
 if result.returncode != 0:
@@ -158,26 +148,20 @@ mutation($discussionId: ID!, $body: String!) {
 }
 '''
 
-with open('add_comment.graphql', 'w') as f:
-    f.write(comment_mutation)
-
 for i, feature in enumerate(features, 1):
     # Create comment body with category label
     comment_body = f'## 🏷️ [{feature["category"]}] {feature["title"]}\n\n'
     comment_body += feature['description']
     comment_body += f'\n\n---\n*Category: {feature["category"]}*'
     
-    # Add comment
-    comment_vars = {
-        'discussionId': discussion_id,
-        'body': comment_body
-    }
-    
+    # Add comment using inline variables
     result = subprocess.run(
-        ['gh', 'api', 'graphql', '--input', 'add_comment.graphql'],
+        ['gh', 'api', 'graphql',
+         '-f', f'query={comment_mutation}',
+         '-f', f'discussionId={discussion_id}',
+         '-f', f'body={comment_body}'],
         capture_output=True,
-        text=True,
-        env={**os.environ, 'GH_GRAPHQL_VARIABLES': json.dumps(comment_vars)}
+        text=True
     )
     
     if result.returncode == 0:
