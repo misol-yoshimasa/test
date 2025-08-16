@@ -162,6 +162,7 @@ class ReleaseNotesParser:
         """Parse features by h3 (category) and h4 (title) structure"""
         features = []
         current_category = "General"
+        last_h3 = None
         
         # Look for all h3 and h4 elements
         for element in soup.find_all(['h3', 'h4', 'h5', 'h6']):
@@ -171,10 +172,38 @@ class ReleaseNotesParser:
             if not text or len(text) < 3:
                 continue
             
-            # H3 elements are categories
+            # H3 elements can be either categories or titles
             if element.name == 'h3':
-                current_category = text
-                logger.debug(f"Found category: {current_category}")
+                # Check if next sibling is also h3 - if so, first h3 is category, second is title
+                next_elem = element.find_next_sibling(['h3', 'h4', 'h5', 'h6'])
+                
+                if next_elem and next_elem.name == 'h3':
+                    # This h3 is a category
+                    current_category = text
+                    last_h3 = element
+                    logger.debug(f"Found category: {current_category}")
+                else:
+                    # This h3 is a title (either standalone or follows another h3)
+                    description = self.get_following_description(element)
+                    if description or (last_h3 and element != last_h3):
+                        # If this h3 immediately follows another h3, it's a title
+                        if last_h3 and element.find_previous_sibling(['h3', 'h4', 'h5', 'h6']) == last_h3:
+                            feature = Feature(
+                                title=text,
+                                description=description if description else "",
+                                category=current_category
+                            )
+                            features.append(feature)
+                            logger.debug(f"Found feature (h3 as title): {text}")
+                        elif description:
+                            # Standalone h3 with description
+                            feature = Feature(
+                                title=text,
+                                description=description,
+                                category=current_category
+                            )
+                            features.append(feature)
+                            logger.debug(f"Found feature (h3): {text}")
             
             # H4 and below are feature titles
             elif element.name in ['h4', 'h5', 'h6']:
@@ -272,6 +301,8 @@ class ReleaseNotesParser:
                 # Extract text content
                 text = self.extract_text_content(sibling)
                 if text and len(text) > 10:  # Skip very short text
+                    # Remove leading colon if present
+                    text = text.lstrip(': ')
                     description_parts.append(text)
             
             sibling = sibling.find_next_sibling()
