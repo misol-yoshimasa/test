@@ -57,9 +57,8 @@ def create_bilingual_content(title: str, content: str, title_en: str, content_ja
     """
     Create bilingual content with English title and Japanese translation
     """
-    # Format with English title and Japanese translation
-    bilingual = f"## {title_en}\n\n"
-    bilingual += f"{content_ja}\n\n"
+    # Don't add title here as it's added in create_discussion.py
+    bilingual = f"{content_ja}\n\n"
     bilingual += "<details>\n"
     bilingual += "<summary>View original English version</summary>\n\n"
     bilingual += f"{content}\n\n"
