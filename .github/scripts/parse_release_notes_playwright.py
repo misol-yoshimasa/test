@@ -238,7 +238,8 @@ class ReleaseNotesParser:
                     title = title_elem.get_text(strip=True)
                     # Remove the title element to get description
                     title_elem.extract()
-                    description = li.get_text(strip=True)
+                    # Get description with images
+                    description = self.process_element_with_images(li)
                     
                     if title and len(title) > 3:
                         feature = Feature(
@@ -257,9 +258,15 @@ class ReleaseNotesParser:
         
         while sibling and sibling.name not in ['h3', 'h4', 'h5', 'h6']:
             if sibling.name in ['p', 'ul', 'ol', 'div']:
-                text = self.extract_text_content(sibling)
-                if text and len(text) > 10:  # Skip very short text
-                    description_parts.append(text)
+                # Extract text and images
+                content = self.extract_content_with_images(sibling)
+                if content and len(content) > 10:  # Skip very short text
+                    description_parts.append(content)
+            elif sibling.name == 'img':
+                # Handle standalone images
+                img_markdown = self.image_to_markdown(sibling)
+                if img_markdown:
+                    description_parts.append(img_markdown)
             
             sibling = sibling.find_next_sibling()
             
@@ -280,6 +287,77 @@ class ReleaseNotesParser:
             return '\n'.join(items)
         else:
             return element.get_text(strip=True)
+    
+    def extract_content_with_images(self, element) -> str:
+        """Extract text content with embedded images as markdown"""
+        # Clone the element to avoid modifying the original
+        import copy
+        element_copy = copy.copy(element)
+        
+        # Find all images in the element
+        images = element.find_all('img')
+        
+        # If there are images, convert them to markdown
+        if images:
+            for img in images:
+                img_markdown = self.image_to_markdown(img)
+                if img_markdown:
+                    # Create a new string element with the markdown
+                    img.replace_with(f" {img_markdown} ")
+        
+        # Now extract the text content
+        if element.name == 'ul':
+            items = []
+            for li in element.find_all('li'):
+                li_content = self.process_element_with_images(li)
+                items.append(f"- {li_content}")
+            return '\n'.join(items)
+        elif element.name == 'ol':
+            items = []
+            for i, li in enumerate(element.find_all('li')):
+                li_content = self.process_element_with_images(li)
+                items.append(f"{i+1}. {li_content}")
+            return '\n'.join(items)
+        else:
+            return self.process_element_with_images(element)
+    
+    def process_element_with_images(self, element) -> str:
+        """Process an element converting images to markdown"""
+        result = []
+        
+        # Process all children
+        for child in element.children:
+            if isinstance(child, str):
+                result.append(child.strip())
+            elif child.name == 'img':
+                img_markdown = self.image_to_markdown(child)
+                if img_markdown:
+                    result.append(img_markdown)
+            else:
+                # Recursively process other elements
+                text = child.get_text(strip=True)
+                if text:
+                    result.append(text)
+        
+        return ' '.join(filter(None, result))
+    
+    def image_to_markdown(self, img_element) -> str:
+        """Convert an img element to markdown format"""
+        src = img_element.get('src', '')
+        alt = img_element.get('alt', 'Image')
+        
+        if not src:
+            return ''
+        
+        # Handle relative URLs
+        if src.startswith('/'):
+            # Assume it's from the Netskope docs site
+            src = f"https://docs.netskope.com{src}"
+        elif not src.startswith(('http://', 'https://')):
+            # Relative URL without leading slash
+            src = f"https://docs.netskope.com/{src}"
+        
+        return f"![{alt}]({src})"
     
     def guess_category(self, element) -> str:
         """Guess category from element context"""
