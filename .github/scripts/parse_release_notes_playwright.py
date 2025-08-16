@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""
+Netskope Release Notes Parser with Playwright
+Python 3.12+ compatible script for parsing release notes with JavaScript rendering
+"""
+
+import json
+import logging
+import sys
+from dataclasses import dataclass, field
+from typing import List, Optional
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Feature:
+    """Represents a single feature in the release notes"""
+    title: str
+    description: str
+    category: str
+    
+    def to_markdown(self) -> str:
+        """Convert feature to markdown format"""
+        return f"### {self.title}\n\n{self.description}"
+
+
+@dataclass
+class ReleaseNotes:
+    """Container for all release notes"""
+    version: str
+    features: List[Feature] = field(default_factory=list)
+    
+    def to_json(self) -> str:
+        """Export release notes as JSON"""
+        data = {
+            "version": self.version,
+            "features": [
+                {
+                    "category": f.category,
+                    "title": f.title,
+                    "description": f.description
+                }
+                for f in self.features
+            ]
+        }
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
+
+class ReleaseNotesParser:
+    """Parser for Netskope release notes using Playwright"""
+    
+    def __init__(self, url: str):
+        self.url = url
+    
+    def fetch_and_parse(self) -> ReleaseNotes:
+        """Fetch page with Playwright and parse content"""
+        with sync_playwright() as p:
+            # Launch browser in headless mode
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            
+            logger.info(f"Fetching page with Playwright: {self.url}")
+            page.goto(self.url, wait_until='networkidle')
+            
+            # Wait for content to load
+            page.wait_for_timeout(3000)
+            
+            # Click on all expandable elements (accordions, etc.)
+            self.expand_all_content(page)
+            
+            # Get the rendered HTML
+            html_content = page.content()
+            browser.close()
+            
+            # Parse the HTML
+            return self.parse_html(html_content)
+    
+    def expand_all_content(self, page):
+        """Expand all collapsible/accordion elements"""
+        try:
+            # Try different selectors for expandable content
+            selectors = [
+                'button[aria-expanded="false"]',
+                '.accordion-button:not(.collapsed)',
+                '.collapsible-header',
+                '[data-toggle="collapse"]',
+                '.expand-button',
+                '.toggle-button',
+                'summary',
+                '.accordion-toggle'
+            ]
+            
+            for selector in selectors:
+                elements = page.query_selector_all(selector)
+                for element in elements:
+                    try:
+                        element.click()
+                        page.wait_for_timeout(100)  # Small delay between clicks
+                    except:
+                        pass
+            
+            # Wait for expansions to complete
+            page.wait_for_timeout(1000)
+            
+        except Exception as e:
+            logger.debug(f"Error expanding content: {e}")
+    
+    def parse_html(self, html_content: str) -> ReleaseNotes:
+        """Parse HTML content and extract release notes"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Extract version
+        version = self.extract_version(soup)
+        release_notes = ReleaseNotes(version=version)
+        
+        # Try multiple strategies to find features
+        features = []
+        
+        # Strategy 1: Look for h3/h4 combinations
+        features.extend(self.parse_by_headings(soup))
+        
+        # Strategy 2: Look for specific class patterns
+        features.extend(self.parse_by_classes(soup))
+        
+        # Strategy 3: Look for list items with strong tags
+        features.extend(self.parse_by_lists(soup))
+        
+        # Remove duplicates based on title
+        seen_titles = set()
+        for feature in features:
+            if feature.title not in seen_titles:
+                release_notes.features.append(feature)
+                seen_titles.add(feature.title)
+        
+        logger.info(f"Parsed {len(release_notes.features)} features")
+        return release_notes
+    
+    def extract_version(self, soup: BeautifulSoup) -> str:
+        """Extract version number from page"""
+        if '129-0-0' in self.url:
+            return '129.0.0'
+        
+        # Try to find version in title or headings
+        title = soup.find('title')
+        if title:
+            import re
+            match = re.search(r'(\d+[\.\-]\d+[\.\-]\d+)', title.get_text())
+            if match:
+                return match.group(1).replace('-', '.')
+        
+        return 'Unknown'
+    
+    def parse_by_headings(self, soup: BeautifulSoup) -> List[Feature]:
+        """Parse features by h3 (category) and h4 (title) structure"""
+        features = []
+        current_category = "General"
+        
+        # Look for all h3 and h4 elements
+        for element in soup.find_all(['h3', 'h4', 'h5', 'h6']):
+            text = element.get_text(strip=True)
+            
+            # Skip empty or navigation headers
+            if not text or len(text) < 3:
+                continue
+            
+            # H3 elements are categories
+            if element.name == 'h3':
+                current_category = text
+                logger.debug(f"Found category: {current_category}")
+            
+            # H4 and below are feature titles
+            elif element.name in ['h4', 'h5', 'h6']:
+                # Get description from following elements
+                description = self.get_following_description(element)
+                if description:
+                    feature = Feature(
+                        title=text,
+                        description=description,
+                        category=current_category
+                    )
+                    features.append(feature)
+                    logger.debug(f"Found feature: {text}")
+        
+        return features
+    
+    def parse_by_classes(self, soup: BeautifulSoup) -> List[Feature]:
+        """Parse features by common class patterns"""
+        features = []
+        
+        # Common patterns for feature sections
+        patterns = [
+            ('feature-item', 'feature-title', 'feature-description'),
+            ('release-item', 'release-title', 'release-content'),
+            ('enhancement', 'title', 'content'),
+            ('card', 'card-title', 'card-body')
+        ]
+        
+        for container_class, title_class, desc_class in patterns:
+            containers = soup.find_all(class_=container_class)
+            for container in containers:
+                title_elem = container.find(class_=title_class)
+                desc_elem = container.find(class_=desc_class)
+                
+                if title_elem and desc_elem:
+                    feature = Feature(
+                        title=title_elem.get_text(strip=True),
+                        description=desc_elem.get_text(strip=True),
+                        category=self.guess_category(container)
+                    )
+                    features.append(feature)
+        
+        return features
+    
+    def parse_by_lists(self, soup: BeautifulSoup) -> List[Feature]:
+        """Parse features from list structures"""
+        features = []
+        current_category = "General"
+        
+        # Look for ul/ol elements that might contain features
+        for list_elem in soup.find_all(['ul', 'ol']):
+            # Check if this list is under a heading
+            prev = list_elem.find_previous_sibling(['h3', 'h4', 'h5'])
+            if prev:
+                current_category = prev.get_text(strip=True)
+            
+            for li in list_elem.find_all('li'):
+                # Look for strong/b tags that might be titles
+                title_elem = li.find(['strong', 'b'])
+                if title_elem:
+                    title = title_elem.get_text(strip=True)
+                    # Remove the title element to get description
+                    title_elem.extract()
+                    description = li.get_text(strip=True)
+                    
+                    if title and len(title) > 3:
+                        feature = Feature(
+                            title=title,
+                            description=description if description else "No description available",
+                            category=current_category
+                        )
+                        features.append(feature)
+        
+        return features
+    
+    def get_following_description(self, element) -> str:
+        """Get description text from elements following a heading"""
+        description_parts = []
+        sibling = element.find_next_sibling()
+        
+        while sibling and sibling.name not in ['h3', 'h4', 'h5', 'h6']:
+            if sibling.name in ['p', 'ul', 'ol', 'div']:
+                text = self.extract_text_content(sibling)
+                if text and len(text) > 10:  # Skip very short text
+                    description_parts.append(text)
+            
+            sibling = sibling.find_next_sibling()
+            
+            # Stop if we've collected enough description
+            if len(' '.join(description_parts)) > 500:
+                break
+        
+        return '\n\n'.join(description_parts) if description_parts else ""
+    
+    def extract_text_content(self, element) -> str:
+        """Extract and format text content from an element"""
+        if element.name == 'ul':
+            items = [f"- {li.get_text(strip=True)}" for li in element.find_all('li')]
+            return '\n'.join(items)
+        elif element.name == 'ol':
+            items = [f"{i+1}. {li.get_text(strip=True)}" 
+                    for i, li in enumerate(element.find_all('li'))]
+            return '\n'.join(items)
+        else:
+            return element.get_text(strip=True)
+    
+    def guess_category(self, element) -> str:
+        """Guess category from element context"""
+        # Look for parent heading
+        parent = element.find_parent(['section', 'div', 'article'])
+        if parent:
+            heading = parent.find(['h3', 'h2'])
+            if heading:
+                return heading.get_text(strip=True)
+        return "General"
+
+
+def main():
+    """Main entry point for the script"""
+    if len(sys.argv) < 2:
+        # Default URL
+        url = "https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0"
+    else:
+        url = sys.argv[1]
+    
+    try:
+        parser = ReleaseNotesParser(url)
+        release_notes = parser.fetch_and_parse()
+        
+        # Output as JSON for GitHub Actions
+        print(release_notes.to_json())
+        
+    except Exception as e:
+        logger.error(f"Failed to parse release notes: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
