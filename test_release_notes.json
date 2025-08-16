@@ -1,0 +1,10 @@
+{
+  "version": "129.0.0",
+  "features": [
+    {
+      "category": "Cloud TAP",
+      "title": "Enhanced Security for Cloud Storage Access over Internet",
+      "description": "Introducing support for AWS IAM Roles Anywhere as an authentication method when writing tapped traffic into AWS S3 storage.\n\nThis is a controlled General Availability feature. Contact Netskope Support or your Sales Representative to enable this feature for your tenant."
+    }
+  ]
+}

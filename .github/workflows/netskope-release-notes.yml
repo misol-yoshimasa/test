@@ -7,6 +7,11 @@ on:
         description: 'Netskope Release Notes URL'
         required: true
         default: 'https://docs.netskope.com/en/new-features-and-enhancements-in-release-129-0-0'
+      translate_to_japanese:
+        description: 'Translate to Japanese using GPT-4o (requires OPENAI_API_KEY secret)'
+        required: false
+        type: boolean
+        default: false
       dry_run:
         description: 'Dry run (parse only, do not create discussion)'
         required: false
@@ -75,6 +80,28 @@ jobs:
           # Set outputs for next steps
           VERSION=$(python -c "import json; print(json.load(open('release_notes.json'))['version'])")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Translate to Japanese
+        if: ${{ github.event.inputs.translate_to_japanese == 'true' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "🌐 Translating features to Japanese using GPT-4o..."
+          
+          # Check if API key is set
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "❌ Error: OPENAI_API_KEY secret is not set"
+            echo "Please add your OpenAI API key as a secret in the repository settings"
+            exit 1
+          fi
+          
+          # Translate features
+          python .github/scripts/translate_with_openai.py release_notes.json > release_notes_translated.json
+          
+          # Replace original with translated version
+          mv release_notes_translated.json release_notes.json
+          
+          echo "✅ Translation complete"
       
       - name: Create Discussion and Comments
         if: ${{ github.event.inputs.dry_run == 'false' }}
